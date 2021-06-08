@@ -30,6 +30,8 @@
 #define CLIENTID    "ExampleClientSub" //XXX: Editar: Cada cliente conectado a un servidor debe tener un clientID diferente.
 #define SUB_TOPIC       "/rpi/controltopic" /*XXX:  Topic al que me voy a suscribir [EDITAR] */
 #define PUB_TOPIC       "/rpi/datatopic" /*XXX:  Topic en el que voy a publicar [EDITAR] */
+#define BTN_TOPIC	"/rpi/btntopic"
+#define ADC_TOPIC	"/rpi/adctopic"
 #define QOS         0
 #define TIMEOUT     10000L
 
@@ -71,7 +73,10 @@ void onConnLost(void *context, char *cause)
 int onMsgArrived(void *context, char *topicName, int topicLen, MQTTAsync_message *message)
 {
 	int i;
-	bool rojo;
+	bool leds[3];
+	bool pins[3];
+	int pins_value[3], rgb[3];
+	float rgb_intensity = 0.0f;
 
 	char* payloadptr;
 
@@ -95,23 +100,53 @@ int onMsgArrived(void *context, char *topicName, int topicLen, MQTTAsync_message
 	//Aqui se obtienen los 3 parametros juntos, pero podria hacerse por separado, invocando 3 veces a json_scanf
 	//Cada una para leer un parametro.
 
-	if (json_scanf(message->payload, message->payloadlen, "{ redLed: %B  }", &rojo)==1)
+	if (json_scanf(message->payload, message->payloadlen, "{ redLed: %B, greenLed: %B, blueLed: %B }", &leds[0], &leds[1], &leds[2]) >= 1)
 	{
 		MESSAGE_LED_GPIO_PARAMETER parametro;
 
-		parametro.leds.red=rojo;
-		parametro.leds.green=0;
-		parametro.leds.blue=0;
+		parametro.leds.red=leds[0];
+		parametro.leds.green=leds[1];
+		parametro.leds.blue=leds[2];
 
 		//Mando el mensaje a la TIVA
 		remotelink_sendMessage(MESSAGE_LED_GPIO,&parametro,sizeof(parametro));
 	}
 	else
 	{
-		printf("No hay campo rojo");
+		printf("Fallo en la recepcion de los colores de los LEDS");
 	}
 
+	if (json_scanf(message->payload, message->payloadlen, "{pin2: %B, pin3: %B, pin4: %B  }", &pins[0], &pins[1], &pins[2]) >= 1)
+	{
+		pins_value = pins;
+	#if CROSS_COMPILING
+		digitalWrite (2, pins_value[0]);
+		digitalWrite (3, pins_value[1]);
+		digitalWrite (4, pins_value[2]);
+	#endif
+	}
+	else
+	{
+		printf("Fallo en la recepcion de los pines de la rpi");
+	}
 
+	if (json_scanf(message->payload, message->payloadlen, "{ redRGB: %d, greenRGB: %d, blueRGB: %d }", &rgb[0], &rgb[1], &rgb[2]) == 3)
+	{
+		remotelink_sendMessage(MESSAGE_RGB_COLOR, (void *)&rgb, sizeof(rgb));
+	}
+	else
+	{
+		printf("Fallo en la recepcion de los colores de los LEDS RGB\n");
+	}
+
+	if (json_scanf(message->payload, message->payloadlen, "{intensityRGB: %f}", &rgb_intensity) == 1)
+	{
+		remotelink_sendMessage(MESSAGE_RGB_BRIGHTNESS, (void *)&rgb_intensity, sizeof(rgb_intensity));
+	}
+	else
+	{
+		printf("Fallo en la recepcion de la intensidad de los leds RGB\n");
+	}
 
 	//Libero el mensaje
 	MQTTAsync_freeMessage(&message);
@@ -205,7 +240,7 @@ PI_THREAD ( TestTask )
 
 	while(1)
 	{
-		delay(1000);
+		delay(2000);
 
 #if CROSS_COMPILING
 		//Este código sólo se compila si vamos a compilar para la RPI
@@ -248,6 +283,9 @@ PI_THREAD ( TestTask )
 static int32_t messageReceived(uint8_t message_type, void *parameters, int32_t parameterSize)
 {
 	int32_t status=0;   //Estado de la ejecucion (positivo, sin errores, negativo si error)
+	char json_buffer[100];
+	uint32_t botones = 0;
+	bool left_btn, right_btn;
 
 	//Comprueba el tipo de mensaje
 	switch (message_type)
@@ -291,10 +329,76 @@ static int32_t messageReceived(uint8_t message_type, void *parameters, int32_t p
 
 			//Imprime los datos por la consola de texto....
 			printf("ADC... ch0: %f ch1: %f ch2: %f ch3: %f\n",muestra1,muestra2,muestra3,muestra4);
+
+			struct json_out out1 = JSON_OUT_BUF(json_buffer, sizeof(json_buffer));//Reinicio out1, de lo contrario se van acumulando los printfs
+			json_printf(&out1,"{ADCch0: %f, ADCch1: %f, ADCch2: %f, ADCch3: %f}",muestra1,muestra2,muestra3,muestra4);
+
+
+			opts.onSuccess = onSend; //Esta funcion callback se ejecutara cuando el SEND se haya realizado correctamente
+			opts.context = client;
+
+			//Parametros del mensaje (payload y QoS)
+			pubmsg.payload = json_buffer; //el payload son los datos
+			pubmsg.payloadlen = strlen(json_buffer);
+			pubmsg.qos = QOS;
+			pubmsg.retained = 0;
+			deliveredtoken = 0;
+
+			//Envía al topic
+			if ((rc = MQTTAsync_sendMessage(client, ADC_TOPIC, &pubmsg, &opts)) != MQTTASYNC_SUCCESS)
+			{
+				printf("Failed to start sendMessage, return code %d\n", rc);
+				exit(-1);
+			}
 		}
 		else
 		{
 			status=PROT_ERROR_INCORRECT_PARAM_SIZE; //Devuelve un error
+		}
+	}
+	break;
+	case MESSAGE_BUTTONS:
+	{
+		if (check_and_extract_command_param(parameters, parameterSize, &botones, sizeof(botones))>0)
+		{
+			if(botones & RIGHT_BUTTON)
+			{
+				right_btn = true;
+			}
+			else
+			{
+				right_btn = false;
+			}
+
+			if(botones & LEFT_BUTTON)
+			{
+				left_btn = true;
+			}
+			else
+			{
+				left_btn = false;
+			}
+
+			struct json_out out1 = JSON_OUT_BUF(json_buffer, sizeof(json_buffer));//Reinicio out1, de lo contrario se van acumulando los printfs
+			json_printf(&out1,"{ rightButton : %B, leftButton: %B}", right_btn, left_btn);
+
+
+			opts.onSuccess = onSend; //Esta funcion callback se ejecutara cuando el SEND se haya realizado correctamente
+			opts.context = client;
+
+			//Parametros del mensaje (payload y QoS)
+			pubmsg.payload = json_buffer; //el payload son los datos
+			pubmsg.payloadlen = strlen(json_buffer);
+			pubmsg.qos = QOS;
+			pubmsg.retained = 0;
+			deliveredtoken = 0;
+
+			//Envía al topic
+			if ((rc = MQTTAsync_sendMessage(client, BTN_TOPIC, &pubmsg, &opts)) != MQTTASYNC_SUCCESS)
+			{
+				printf("Failed to start sendMessage, return code %d\n", rc);
+				exit(-1);
+			}
 		}
 	}
 	break;
@@ -316,6 +420,9 @@ int main(int argc, char* argv[])
 	//Este código sólo se compila si vamos a compilar para la RPI
 	wiringPiSetupGpio();
 	pinMode (19,OUTPUT);
+	pinMode (2,OUTPUT);
+	pinMode (3,OUTPUT);
+	pinMode (4,OUTPUT);
 #endif
 
 	//Inicializa la parte del puerto serie.... [CONEXION TIVA]
