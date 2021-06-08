@@ -26,7 +26,12 @@
 
 #define TIVA_SERIAL_PORT "/dev/ttyACM0"
 
-#define ADDRESS     "tcp://localhost:1883" /*XXX:  IP/Puerto del servidor [EDITAR] */
+#define LEFT_BUTTON              0x00000010  // GPIO pin 4
+#define RIGHT_BUTTON              0x00000001  // GPIO pin 0
+
+
+
+#define ADDRESS     "tcp://192.168.178.123:1883" /*XXX:  IP/Puerto del servidor [EDITAR] */
 #define CLIENTID    "ExampleClientSub" //XXX: Editar: Cada cliente conectado a un servidor debe tener un clientID diferente.
 #define SUB_TOPIC       "/rpi/controltopic" /*XXX:  Topic al que me voy a suscribir [EDITAR] */
 #define PUB_TOPIC       "/rpi/datatopic" /*XXX:  Topic en el que voy a publicar [EDITAR] */
@@ -111,41 +116,27 @@ int onMsgArrived(void *context, char *topicName, int topicLen, MQTTAsync_message
 		//Mando el mensaje a la TIVA
 		remotelink_sendMessage(MESSAGE_LED_GPIO,&parametro,sizeof(parametro));
 	}
-	else
-	{
-		printf("Fallo en la recepcion de los colores de los LEDS");
-	}
 
 	if (json_scanf(message->payload, message->payloadlen, "{pin2: %B, pin3: %B, pin4: %B  }", &pins[0], &pins[1], &pins[2]) >= 1)
 	{
-		pins_value = pins;
+		pins_value[0] = pins[0];
+		pins_value[1] = pins[1];
+		pins_value[2] = pins[2];
 	#if CROSS_COMPILING
 		digitalWrite (2, pins_value[0]);
 		digitalWrite (3, pins_value[1]);
 		digitalWrite (4, pins_value[2]);
 	#endif
 	}
-	else
-	{
-		printf("Fallo en la recepcion de los pines de la rpi");
-	}
 
 	if (json_scanf(message->payload, message->payloadlen, "{ redRGB: %d, greenRGB: %d, blueRGB: %d }", &rgb[0], &rgb[1], &rgb[2]) == 3)
 	{
 		remotelink_sendMessage(MESSAGE_RGB_COLOR, (void *)&rgb, sizeof(rgb));
 	}
-	else
-	{
-		printf("Fallo en la recepcion de los colores de los LEDS RGB\n");
-	}
 
 	if (json_scanf(message->payload, message->payloadlen, "{intensityRGB: %f}", &rgb_intensity) == 1)
 	{
-		remotelink_sendMessage(MESSAGE_RGB_BRIGHTNESS, (void *)&rgb_intensity, sizeof(rgb_intensity));
-	}
-	else
-	{
-		printf("Fallo en la recepcion de la intensidad de los leds RGB\n");
+		remotelink_sendMessage(MESSAGE_LED_PWM_BRIGHTNESS, (void *)&rgb_intensity, sizeof(rgb_intensity));
 	}
 
 	//Libero el mensaje
@@ -286,6 +277,9 @@ static int32_t messageReceived(uint8_t message_type, void *parameters, int32_t p
 	char json_buffer[100];
 	uint32_t botones = 0;
 	bool left_btn, right_btn;
+	MQTTAsync_responseOptions opts = MQTTAsync_responseOptions_initializer;
+	MQTTAsync_message pubmsg = MQTTAsync_message_initializer;
+	int rc;
 
 	//Comprueba el tipo de mensaje
 	switch (message_type)
@@ -361,7 +355,7 @@ static int32_t messageReceived(uint8_t message_type, void *parameters, int32_t p
 	{
 		if (check_and_extract_command_param(parameters, parameterSize, &botones, sizeof(botones))>0)
 		{
-			if(botones & RIGHT_BUTTON)
+			if(!(botones & RIGHT_BUTTON))
 			{
 				right_btn = true;
 			}
@@ -370,7 +364,7 @@ static int32_t messageReceived(uint8_t message_type, void *parameters, int32_t p
 				right_btn = false;
 			}
 
-			if(botones & LEFT_BUTTON)
+			if(!(botones & LEFT_BUTTON))
 			{
 				left_btn = true;
 			}
