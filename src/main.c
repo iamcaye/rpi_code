@@ -47,6 +47,7 @@ MQTTAsync client; //Global para gestionar el cliente (se puede hacer más elegan
 static int disc_finished = 0;
 static int subscribed = 0;
 static int finished = 0;
+static float g_frec = 0.5;
 
 //PI_THREAD es una macro de la biblioteca WirinPi
 PI_THREAD ( TestTask ); //Declaracion de un thread implementado mas abajo
@@ -137,6 +138,10 @@ int onMsgArrived(void *context, char *topicName, int topicLen, MQTTAsync_message
 	if (json_scanf(message->payload, message->payloadlen, "{intensityRGB: %f}", &rgb_intensity) == 1)
 	{
 		remotelink_sendMessage(MESSAGE_LED_PWM_BRIGHTNESS, (void *)&rgb_intensity, sizeof(rgb_intensity));
+	}
+
+	if (json_scanf(message->payload, message->payloadlen, "{ADCFrec: %f}", &g_frec) == 1){
+		printf("Frecuencia recibida\n");
 	}
 
 	//Libero el mensaje
@@ -231,7 +236,7 @@ PI_THREAD ( TestTask )
 
 	while(1)
 	{
-		delay(2000);
+		delay(1000*(1/g_frec));
 
 #if CROSS_COMPILING
 		//Este código sólo se compila si vamos a compilar para la RPI
