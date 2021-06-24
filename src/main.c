@@ -31,12 +31,12 @@
 
 
 
-#define ADDRESS     "tcp://192.168.178.123:1883" /*XXX:  IP/Puerto del servidor [EDITAR] */
+#define ADDRESS     "tcp://localhost:1883" /*XXX:  IP/Puerto del servidor [EDITAR] */
 #define CLIENTID    "ExampleClientSub" //XXX: Editar: Cada cliente conectado a un servidor debe tener un clientID diferente.
 #define SUB_TOPIC       "/rpi/controltopic" /*XXX:  Topic al que me voy a suscribir [EDITAR] */
 #define PUB_TOPIC       "/rpi/datatopic" /*XXX:  Topic en el que voy a publicar [EDITAR] */
 #define BTN_TOPIC	"/rpi/btntopic"
-#define ADC_TOPIC	"/rpi/adctopic"
+#define ADC_TOPIC	"/rpi/ADC"
 #define QOS         0
 #define TIMEOUT     10000L
 
@@ -48,6 +48,9 @@ static int disc_finished = 0;
 static int subscribed = 0;
 static int finished = 0;
 static float g_frec = 0.5;
+static int n_btn_right = 0;
+static int n_btn_left = 0;
+
 
 //PI_THREAD es una macro de la biblioteca WirinPi
 PI_THREAD ( TestTask ); //Declaracion de un thread implementado mas abajo
@@ -106,7 +109,7 @@ int onMsgArrived(void *context, char *topicName, int topicLen, MQTTAsync_message
 	//Aqui se obtienen los 3 parametros juntos, pero podria hacerse por separado, invocando 3 veces a json_scanf
 	//Cada una para leer un parametro.
 
-	if (json_scanf(message->payload, message->payloadlen, "{ redLed: %B, greenLed: %B, blueLed: %B }", &leds[0], &leds[1], &leds[2]) >= 1)
+	if (!strcmp(topicName, "/rpi/GPIOTiva") && (json_scanf(message->payload, message->payloadlen, "{ redLed: %B, greenLed: %B, blueLed: %B }", &leds[0], &leds[1], &leds[2]) >= 1))
 	{
 		MESSAGE_LED_GPIO_PARAMETER parametro;
 
@@ -118,7 +121,7 @@ int onMsgArrived(void *context, char *topicName, int topicLen, MQTTAsync_message
 		remotelink_sendMessage(MESSAGE_LED_GPIO,&parametro,sizeof(parametro));
 	}
 
-	if (json_scanf(message->payload, message->payloadlen, "{pin2: %B, pin3: %B, pin4: %B  }", &pins[0], &pins[1], &pins[2]) >= 1)
+	if (!strcmp(topicName, "/rpi/GPIORpi") && json_scanf(message->payload, message->payloadlen, "{pin2: %B, pin3: %B, pin4: %B  }", &pins[0], &pins[1], &pins[2]) >= 1)
 	{
 		pins_value[0] = pins[0];
 		pins_value[1] = pins[1];
@@ -130,17 +133,17 @@ int onMsgArrived(void *context, char *topicName, int topicLen, MQTTAsync_message
 	#endif
 	}
 
-	if (json_scanf(message->payload, message->payloadlen, "{ redRGB: %d, greenRGB: %d, blueRGB: %d }", &rgb[0], &rgb[1], &rgb[2]) == 3)
+	if (!strcmp(topicName, "/rpi/PWM") && json_scanf(message->payload, message->payloadlen, "{ redRGB: %d, greenRGB: %d, blueRGB: %d }", &rgb[0], &rgb[1], &rgb[2]) == 3)
 	{
 		remotelink_sendMessage(MESSAGE_RGB_COLOR, (void *)&rgb, sizeof(rgb));
 	}
 
-	if (json_scanf(message->payload, message->payloadlen, "{intensityRGB: %f}", &rgb_intensity) == 1)
+	if (!strcmp(topicName, "/rpi/PWM") && json_scanf(message->payload, message->payloadlen, "{intensityRGB: %f}", &rgb_intensity) == 1)
 	{
 		remotelink_sendMessage(MESSAGE_LED_PWM_BRIGHTNESS, (void *)&rgb_intensity, sizeof(rgb_intensity));
 	}
 
-	if (json_scanf(message->payload, message->payloadlen, "{ADCFrec: %f}", &g_frec) == 1){
+	if (!strcmp(topicName, "/rpi/ADC") && json_scanf(message->payload, message->payloadlen, "{ADCFrec: %f}", &g_frec) == 1){
 		printf("Frecuencia recibida\n");
 	}
 
@@ -194,6 +197,7 @@ void onConnect(void* context, MQTTAsync_successData* response)
 {
 	MQTTAsync_responseOptions opts = MQTTAsync_responseOptions_initializer;
 	int rc;
+	char *topics[] = {"/rpi/GPIORpi", "/rpi/GPIOTiva", "/rpi/PWM", "/rpi/ADC"};
 
 	printf("Successful connection\n");
 
@@ -205,10 +209,13 @@ void onConnect(void* context, MQTTAsync_successData* response)
 
 	deliveredtoken = 0;
 	//Realiza la peticion de suscripcion
-	if ((rc = MQTTAsync_subscribe(client, SUB_TOPIC, QOS, &opts)) != MQTTASYNC_SUCCESS)
-	{
-		printf("Failed to start subscribe, return code %d\n", rc);
-		exit(-1);
+	for(unsigned i = 0 ; i < 4 ; i++){
+		printf("%s \n", topics[i]);
+		if ((rc = MQTTAsync_subscribe(client, topics[i], QOS, &opts)) != MQTTASYNC_SUCCESS)
+		{
+			printf("Failed to start subscribe, return code %d\n", rc);
+			exit(-1);
+		}
 	}
 
 	piThreadCreate(TestTask); //Crea la tarea que hace el envio periodico
@@ -363,6 +370,7 @@ static int32_t messageReceived(uint8_t message_type, void *parameters, int32_t p
 			if(!(botones & RIGHT_BUTTON))
 			{
 				right_btn = true;
+				n_btn_right++;
 			}
 			else
 			{
@@ -372,6 +380,7 @@ static int32_t messageReceived(uint8_t message_type, void *parameters, int32_t p
 			if(!(botones & LEFT_BUTTON))
 			{
 				left_btn = true;
+				n_btn_left++;
 			}
 			else
 			{
@@ -379,7 +388,7 @@ static int32_t messageReceived(uint8_t message_type, void *parameters, int32_t p
 			}
 
 			struct json_out out1 = JSON_OUT_BUF(json_buffer, sizeof(json_buffer));//Reinicio out1, de lo contrario se van acumulando los printfs
-			json_printf(&out1,"{ rightButton : %B, leftButton: %B}", right_btn, left_btn);
+			json_printf(&out1,"{ rightButton : %B, leftButton: %B, nRightButton: %d, nLeftButton: %d}", right_btn, left_btn, n_btn_right, n_btn_left);
 
 
 			opts.onSuccess = onSend; //Esta funcion callback se ejecutara cuando el SEND se haya realizado correctamente
@@ -412,7 +421,6 @@ static int32_t messageReceived(uint8_t message_type, void *parameters, int32_t p
 
 int main(int argc, char* argv[])
 {
-
 	//Inicializacion Wiring Pi y configuracion GPIO
 
 #if CROSS_COMPILING
@@ -447,14 +455,15 @@ int main(int argc, char* argv[])
 	conn_opts.onFailure = onConnectFailure; //Esta funcion callback se ejecutara si la conexion falla
 	conn_opts.context = client;
 
-	//Conecta con el servidor MQTT
+	// Conecta con el servidor MQTT
 	if ((rc = MQTTAsync_connect(client, &conn_opts)) != MQTTASYNC_SUCCESS)
 	{
 		printf("Failed to start connect, return code %d\n", rc);
 		exit(-1);
 	}
 
-	while	(!subscribed)
+
+	while(!subscribed)
 	{
 		usleep(10000L);
 	}
