@@ -47,7 +47,7 @@ MQTTAsync client; //Global para gestionar el cliente (se puede hacer más elegan
 static int disc_finished = 0;
 static int subscribed = 0;
 static int finished = 0;
-static float g_frec = 0.5;
+static double g_frec = 0.5;
 static int n_btn_right = 0;
 static int n_btn_left = 0;
 
@@ -85,7 +85,7 @@ int onMsgArrived(void *context, char *topicName, int topicLen, MQTTAsync_message
 	bool leds[3];
 	bool pins[3];
 	int pins_value[3], rgb[3];
-	float rgb_intensity = 0.0f;
+	double rgb_intensity = 0.0f;
 
 	char* payloadptr;
 
@@ -243,7 +243,7 @@ PI_THREAD ( TestTask )
 
 	while(1)
 	{
-		delay(1000*(1/g_frec));
+		delay(1000.0*(1.0/g_frec));
 
 #if CROSS_COMPILING
 		//Este código sólo se compila si vamos a compilar para la RPI
@@ -398,7 +398,7 @@ static int32_t messageReceived(uint8_t message_type, void *parameters, int32_t p
 			pubmsg.payload = json_buffer; //el payload son los datos
 			pubmsg.payloadlen = strlen(json_buffer);
 			pubmsg.qos = QOS;
-			pubmsg.retained = 0;
+			pubmsg.retained = 1;
 			deliveredtoken = 0;
 
 			//Envía al topic
@@ -421,6 +421,7 @@ static int32_t messageReceived(uint8_t message_type, void *parameters, int32_t p
 
 int main(int argc, char* argv[])
 {
+
 	//Inicializacion Wiring Pi y configuracion GPIO
 
 #if CROSS_COMPILING
